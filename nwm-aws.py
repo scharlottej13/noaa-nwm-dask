@@ -4,33 +4,42 @@ import fsspec
 import numpy as np
 import rioxarray
 import xarray as xr
+import dask
+
 
 cluster = coiled.Cluster(
-    name="nwm-2001-2020",
+    name="r6i-2015-2020",
     region="us-east-1",
     n_workers=10,
-    tags={"project": "nwm"},
-    scheduler_vm_types="r7g.xlarge",
-    worker_vm_types="c7g.xlarge",
+    tags={"project": "nwm", "chunks": "896,350,350"},
+    scheduler_vm_types="r6i.xlarge",
+    worker_vm_types="r6i.2xlarge",
     compute_purchase_option="spot_with_fallback"
 )
 
 client = cluster.get_client()
+client.restart()
+cluster.adapt(minimum=10, maximum=50)
 
-cluster.adapt(minimum=10, maximum=200)
 
 ds = xr.open_zarr(
-    fsspec.get_mapper("s3://noaa-nwm-retrospective-2-1-zarr-pds/rtout.zarr", anon=True),
+    fsspec.get_mapper(
+        "s3://noaa-nwm-retrospective-2-1-zarr-pds/rtout.zarr", anon=True
+    ),
     consolidated=True,
+    chunks={"time": 896, "x": 350, "y": 350}
 )
 
-subset = ds.zwattablrt.sel(time=slice("2001-01-01", "2020-12-31"))
+subset = ds.zwattablrt.sel(
+    time=slice("2015-01-01", "2020-12-31")
+)
 
 fs = fsspec.filesystem("s3", requester_pays=True)
 
-counties = rioxarray.open_rasterio(
-    fs.open("s3://nwm-250m-us-counties/Counties_on_250m_grid.tif"), chunks="auto"
-).squeeze()
+with dask.annotate(retries=3):
+    counties = rioxarray.open_rasterio(
+        fs.open("s3://nwm-250m-us-counties/Counties_on_250m_grid.tif"), chunks="auto"
+    ).squeeze()
 
 # remove any small floating point error in coordinate locations
 _, counties_aligned = xr.align(ds, counties, join="override")
@@ -38,6 +47,7 @@ _, counties_aligned = xr.align(ds, counties, join="override")
 county_id = np.unique(counties_aligned.data).compute()
 county_id = county_id[county_id != 0]
 print(f"There are {len(county_id)} counties!")
+
 
 county_mean = flox.xarray.xarray_reduce(
     subset,
@@ -47,8 +57,8 @@ county_mean = flox.xarray.xarray_reduce(
 )
 
 county_mean.load()
-print("Saving")
-county_mean.to_netcdf("mean_zwattablrt_nwm.nc")
+# print("Saving")
+# county_mean.to_netcdf("mean_zwattablrt_nwm_1980_2020.nc")
 cluster.shutdown()
 
 
