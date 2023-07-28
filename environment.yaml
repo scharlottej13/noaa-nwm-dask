@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - pyviz
 dependencies:
+  - python=3.11
   - xarray
   - dask
   - flox
@@ -17,4 +18,5 @@ dependencies:
   - geoviews
   - jupyterlab
   - dask-labextension
+  - gilknocker
 
