@@ -6,15 +6,16 @@ import rioxarray
 import xarray as xr
 import dask
 
+# optionally run with coiled run
+# coiled run --region us-east-1 --vm-type m6g.xlarge python nwm-aws.py
 
 cluster = coiled.Cluster(
-    name="r7g-1979-2020",
-    region="us-east-1",
+    name="nwm-1979-2020",
+    region="us-east-1", # close to data
     n_workers=10,
-    tags={"project": "nwm", "chunks": "896,350,350", "persist": "yes"},
-    scheduler_vm_types="r7g.xlarge",
+    scheduler_vm_types="r7g.xlarge", # ARM
     worker_vm_types="r7g.2xlarge",
-    compute_purchase_option="spot_with_fallback"
+    compute_purchase_option="spot_with_fallback" # use spot, replace with on-demand
 )
 
 client = cluster.get_client()
@@ -60,39 +61,7 @@ county_mean = flox.xarray.xarray_reduce(
 
 county_mean.load()
 yearly_mean = county_mean.mean("time")
+# optionally, save dataset for further analysis
 # print("Saving")
-# yearly_mean = county_mean.mean("time")
-# county_mean.to_netcdf("mean_zwattablrt_nwm_1980_2020.nc")
+# yearly_mean.to_netcdf("mean_zwattablrt_nwm_1979_2020.nc")
 cluster.shutdown()
-
-
-def make_plot():
-    # ## Visualize yearly mean
-    # Read county shapefile, combo of state FIPS code and county FIPS code as multi-index
-    import geopandas as gpd
-    import hvplot.pandas
-
-    counties = gpd.read_file(
-        "https://www2.census.gov/geo/tiger/GENZ2022/shp/cb_2022_us_county_20m.zip"
-    ).to_crs("EPSG:3395")
-    counties["STATEFP"] = counties.STATEFP.astype(int)
-    counties["COUNTYFP"] = counties.COUNTYFP.astype(int)
-    continental = counties[~counties["STATEFP"].isin([2, 15, 72])].set_index(["STATEFP", "COUNTYFP"])
-
-    # Interpret `county` as combo of state FIPS code and county FIPS code. Set multi-index
-    county_mean = xr.open_dataset("mean_zwattablrt_nwm.nc")
-    yearly_mean.coords["STATEFP"] = (yearly_mean.county // 1000).astype(int)
-    yearly_mean.coords["COUNTYFP"] = np.mod(yearly_mean.county, 1000).astype(int)
-    yearly_mean = yearly_mean.drop_vars("county").set_index(county=["STATEFP", "COUNTYFP"])
-    yearly_mean
-
-    # Join
-    continental["zwattablrt"] = yearly_mean.to_dataframe()["zwattablrt"]
-
-    continental.hvplot(
-        c="zwattablrt",
-        cmap='turbo_r',
-        title="Average Water Table Depth in 2001 by US County (meters)",
-        xaxis=None,
-        yaxis=None
-    )
